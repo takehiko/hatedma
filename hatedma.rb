@@ -330,7 +330,7 @@ EOS
       # exact search
       if @tag_h.key?(tag)
         print_tag_entry(tag, false)
-        # return
+        return
       end
 
       # prefix search
