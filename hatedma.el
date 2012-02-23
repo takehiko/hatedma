@@ -4,7 +4,6 @@
 (defun find-file-hatedma ()
   "Open ~/.hatedma/data/yyyy/mm/dd_utime.txt file by URL"
   (interactive)
-  (beginning-of-line)
   (save-excursion
     (let* ((pos (search-forward "http://d.hatena.ne.jp/hatenausername/" (point-max) t)))
       (if (not (eq pos nil))
