@@ -305,6 +305,7 @@ EOS
 
       art_a = []
       Dir.glob(glob) do |filename|
+        next if test(?d, filename)
         open(filename) do |f_in|
           body = f_in.read
           if body.index(word)
@@ -654,7 +655,9 @@ if __FILE__ == $0
     h[:save_amazon] = true
     include HatenaDiaryManager::AmazonSearcher
     setup
+    puts "<begin search:#{h[:asin]}>"
     print_property(search(h[:asin], h))
+    puts "<end search:#{h[:asin]}>"
     exit
   when :status
     HatenaDiaryManager::Config.instance.setup(h).print_status
