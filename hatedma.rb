@@ -19,7 +19,7 @@ DATA_DIR = File.expand_path("~/.hatedma")
 module HatenaDiaryManager
   class Config
     include Singleton
-    attr_accessor :base_dir, :username
+    attr_accessor :base_dir, :username, :user_dir
     attr_accessor :dir_diary, :dir_diary_old, :file_tag, :file_tag_old
     attr_accessor :file_amazon, :file_list_title, :file_list_date
     attr_accessor :file_diary
@@ -29,18 +29,23 @@ module HatenaDiaryManager
       @initialized = true
 
       @base_dir = h[:data_dir] || DATA_DIR
-      @username = h[:username] || HATENA_USERNAME
+      @username = h[:username] || ENV["HATENA_USERNAME"] || HATENA_USERNAME
+      @user_dir = "#{@base_dir}/#{@username}"
 
       unless test(?d, @base_dir)
         FileUtils.mkdir_p(@base_dir, :verbose => true)
       end
+      if @base_dir != @user_dir && !test(?d, @user_dir)
+        FileUtils.mkdir_p(@user_dir, :verbose => true)
+      end
 
-      @dir_diary = "#{@base_dir}/data"
+      @dir_diary = "#{@user_dir}/data"
       @dir_diary_old = "#{@dir_diary}.old"
-      @file_tag = "#{@base_dir}/tag.pstore"
+      @file_tag = "#{@user_dir}/tag.pstore"
       @file_tag_old = "#{@file_tag}.old"
       @file_amazon = "#{@base_dir}/amazon.pstore"
-      @file_list_title = "#{@base_dir}/#{@username}_title.txt"
+      # @file_amazon = "#{@user_dir}/amazon.pstore"
+      @file_list_title = "#{@user_dir}/#{@username}_title.txt"
       @file_list_date = @file_list_title.sub(/_title.txt$/, "_date.txt")
       @file_diary = find_diary_file
 
@@ -50,10 +55,7 @@ module HatenaDiaryManager
     def find_diary_file
       files = []
       dirs = ["."]
-      if ENV.key?("T") && test(?d, ENV["T"])
-        dirs << ENV["T"]
-      end
-      dirs << @base_dir
+      dirs << @user_dir << @base_dir
       filenames = [@username, "#{@username}.xml", "#{@username}.xml.gz"]
 
       dirs.each do |dir|
@@ -78,6 +80,7 @@ module HatenaDiaryManager
     def print_status
       {:base_dir => "base directory",
         :username => "user name of hatena",
+        :user_dir => "user's directory",
         :dir_diary => "directory of diary files",
         :dir_diary_old => "directory of diary files (backup)",
         :file_tag => "tags and entries (PStore)",
@@ -126,6 +129,7 @@ module HatenaDiaryManager
       c.setup(h)
       @base_dir = c.base_dir
       @username = c.username
+      @user_dir = c.user_dir
       @dir_diary = c.dir_diary
       @dir_diary_old = c.dir_diary_old
       @file_tag = c.file_tag
@@ -156,8 +160,10 @@ module HatenaDiaryManager
             utime, title0 = $1, $2
             if /^\[.+\]/ =~ title0
               tag, title = $&, $'.strip
+              tag_comment = " <!-- #{tag} -->"
             else
               tag, title = "", title0
+              tag_comment = ""
             end
             if art
               art.body = art.body.sub(/<\/body>.*\z/m, "")
@@ -171,6 +177,7 @@ module HatenaDiaryManager
 URL:    #{art.url}
 title0: #{title0}
 tag:    #{tag}
+tagcom: #{tag_comment}
 title:  #{title}
 utime:  #{utime}
 time:   #{art.time}
@@ -179,8 +186,15 @@ file:   #{art.file}
 line:   #{line}
 EOS
 
+            # http://d.hatena.ne.jp/takehikom/20120113/1326401059 *[hatedma][Ruby] hatedma: はてなダイアリーマネジャー
             f_out_title.print "#{art.url} *#{tag} #{title}\r\n"
-            f_out_date.print "[#{art.url}:title=#{art.ymd}（#{title}）]\r\n"
+
+            # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=2012年1月13日]<span class="deco" style="font-size:xx-small;">（hatedma: はてなダイアリーマネジャー）</span> <!-- [hatedma][Ruby] -->
+            f_out_date.print "[#{art.url}:title=#{art.ymd}]<span class=\"deco\" style=\"font-size:xx-small;\">（#{title}）</span>#{tag_comment}\r\n"
+
+            # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=2012年1月13日（hatedma: はてなダイアリーマネジャー）]
+            # f_out_date.print "[#{art.url}:title=#{art.ymd}（#{title}）]\r\n"
+
           elsif art
             art.body += line
             find_tag(line, art.utime)
@@ -549,6 +563,17 @@ EOS
         else
           puts "#{key}: #{value}"
         end
+      end
+
+      if /book/i =~ attr["product_group"]
+        puts
+        if /^97[89]/ =~ attr["ean"]
+          puts "[isbn:#{attr['ean']}]"
+        end
+        title = attr["title"].gsub(/[\s　]/, "")
+        puts "><a name=\"#{title}\">"
+        puts "</a><"
+        puts "\##{title}"
       end
 
       if attr.key?("asin")
