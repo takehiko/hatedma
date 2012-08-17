@@ -118,6 +118,8 @@ module HatenaDiaryManager
         action_search_tag
       when :tag_all
         action_tag_all
+      when :artstat
+        action_article_stat
       else
         puts "Ignored. Please specify one of -A/-S/-T/-G!"
         exit
@@ -419,6 +421,44 @@ EOS
         save_amazon
       end
     end
+
+    def action_article_stat
+      tag_stat = {} # tag_name => [entries, line, byte_size, char_size]
+
+      Dir.glob("#{@dir_diary}/**/*.txt") do |filename|
+        body = open(filename).read
+        if /^\*[0-9]+\*\s*(.*)$/ =~ body
+          title = $1
+          tag_a = title.scan(/\[.*?\]/)
+          if tag_a.empty?
+            tag_a = ["(nonsection)"]
+          else
+            tag_a.map! {|item| item[1...-1]}
+          end
+          tag_a << "(total)"
+
+          line = body.scan(/\n/).size
+          byte_size = body.bytesize
+          char_size = body.split(//).size
+
+          tag_a.each do |t|
+            if tag_stat.key?(t)
+              tag_stat[t][0] += 1
+              tag_stat[t][1] += line
+              tag_stat[t][2] += byte_size
+              tag_stat[t][3] += char_size
+            else
+              tag_stat[t] = [1, line, byte_size, char_size]
+            end
+          end
+        end
+      end
+
+      puts "files lines byte_size char_size tag"
+      tag_stat.keys.sort_by {|key| "%05d%08d" % [tag_stat[key][0], tag_stat[key][2]]}.reverse.each do |key|
+        puts "#{tag_stat[key].join(' ')} #{key}"
+      end
+    end
   end
 
   class Article
@@ -648,6 +688,9 @@ if __FILE__ == $0
   }
   opt.on("-E", "--status", "print directory and file names") {
     h[:action] = :status
+  }
+  opt.on("-K", "--artstat", "print statistics of articles") {
+    h[:action] = :artstat
   }
   opt.on("-n", "--name=VAL", "hatena user name") {|v|
     h[:username] = v
