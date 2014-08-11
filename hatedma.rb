@@ -22,6 +22,7 @@ module HatenaDiaryManager
     attr_accessor :base_dir, :username, :user_dir
     attr_accessor :dir_diary, :dir_diary_old, :file_tag, :file_tag_old
     attr_accessor :file_amazon, :file_list_title, :file_list_date
+    attr_accessor :file_list_wiki
     attr_accessor :file_diary
 
     def setup(h = {})
@@ -47,6 +48,7 @@ module HatenaDiaryManager
       # @file_amazon = "#{@user_dir}/amazon.pstore"
       @file_list_title = "#{@user_dir}/#{@username}_title.txt"
       @file_list_date = @file_list_title.sub(/_title.txt$/, "_date.txt")
+      @file_list_wiki = @file_list_title.sub(/_title.txt$/, "_wiki.txt")
       @file_diary = find_diary_file
 
       self
@@ -88,6 +90,7 @@ module HatenaDiaryManager
         :file_amazon => "product/book info (PStore)",
         :file_list_title => "list of URLs, tags and titles",
         :file_list_date => "list of URLs, dates and titles",
+        :file_list_wiki => "list of URLs for Wiki link",
         :file_diary => "log file to be analized",
       }.each_pair do |sym, str|
         puts "-- #{str}"
@@ -139,6 +142,7 @@ module HatenaDiaryManager
       @file_amazon = c.file_amazon
       @file_list_title = c.file_list_title
       @file_list_date = c.file_list_date
+      @file_list_wiki = c.file_list_wiki
       @file_diary = c.file_diary
     end
 
@@ -147,6 +151,7 @@ module HatenaDiaryManager
       puts "Diary file: #{@file_diary}"
       f_out_title = open(@file_list_title, "w")
       f_out_date = open(@file_list_date, "w")
+      f_out_wiki = open(@file_list_wiki, "w")
 
       if /\.gz$/ =~ @file_diary
         command_pre = "|zcat "
@@ -158,7 +163,7 @@ module HatenaDiaryManager
       open(command_pre + @file_diary) do |f_in|
         f_in.each_line do |line0|
           line = line0.reduce_amp
-          if /^\*([0-9]+)\*\s*(.*)$/ =~ line
+          if /^\*([0-9]{10,})\*\s*(.*)$/ =~ line
             utime, title0 = $1, $2
             if /^\[.+\]/ =~ title0
               tag, title = $&, $'.strip
@@ -174,12 +179,14 @@ module HatenaDiaryManager
             art = HatenaDiaryManager::Article.new(utime)
             art.body = line
             find_tag(line, utime)
+            date_tag_comment = "<!-- #{art.ymd}#{tag.empty? ? '' : ' '}#{tag} -->"
 
             print <<EOS if $DEBUG
 URL:    #{art.url}
 title0: #{title0}
 tag:    #{tag}
 tagcom: #{tag_comment}
+dtcom:  #{date_tag_comment}
 title:  #{title}
 utime:  #{utime}
 time:   #{art.time}
@@ -188,14 +195,14 @@ file:   #{art.file}
 line:   #{line}
 EOS
 
-            # http://d.hatena.ne.jp/takehikom/20120113/1326401059 *[hatedma][Ruby] hatedma: はてなダイアリーマネジャー
-            f_out_title.print "#{art.url} *#{tag} #{title}\r\n"
+            # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=hatedma: はてなダイアリーマネジャー]<!-- 2012年1月13日 [hatedma][Ruby] -->
+            f_out_title.print "[#{art.url}:title=#{title}]#{date_tag_comment}\r\n"
 
             # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=2012年1月13日]<span class="deco" style="font-size:xx-small;">（hatedma: はてなダイアリーマネジャー）</span> <!-- [hatedma][Ruby] -->
             f_out_date.print "[#{art.url}:title=#{art.ymd}]<span class=\"deco\" style=\"font-size:xx-small;\">（#{title}）</span>#{tag_comment}\r\n"
 
-            # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=2012年1月13日（hatedma: はてなダイアリーマネジャー）]
-            # f_out_date.print "[#{art.url}:title=#{art.ymd}（#{title}）]\r\n"
+            # [[hatedma: はてなダイアリーマネジャー>http://d.hatena.ne.jp/takehikom/20120113/1326401059]]// 2012年1月13日 [hatedma][Ruby]
+            f_out_wiki.print "[[#{title}>#{art.url}]]//#{date_tag_comment}\r\n"
 
           elsif art
             art.body += line
@@ -209,6 +216,7 @@ EOS
 
       f_out_title.close
       f_out_date.close
+      f_out_wiki.close
     end
 
     def find_tag(s, utime)
@@ -566,7 +574,7 @@ EOS
       req = Amazon::AWS::Search::Request.new
       begin
         res = req.search(a)
-        get_property(res.item_search_response.items.item)
+        get_property(res.item_search_response.items.item.first)
       rescue
         Hash.new
       end
@@ -578,17 +586,32 @@ EOS
       req = Amazon::AWS::Search::Request.new
       begin
         res = req.search(a)
-        get_property(res.item_lookup_response.items.item)
+        get_property(res.item_lookup_response.items.item.first)
       rescue
         Hash.new
       end
     end
 
+    def get_AWSObject_attr(item, level = 0)
+      vars = item.instance_variables.delete_if { |c| c == :@__val__ || c == :@attrib }
+      nl_idt = ("\n" + "  " * level)
+      if item.is_a?(Array)
+        item.map { |c| (item.length > 1 ? nl_idt : "") + get_AWSObject_attr(c, level + 1)}.join
+      elsif !vars.empty?
+        vars.map { |var|
+          nl_idt + var.to_s + " = " +
+          get_AWSObject_attr(item.instance_variable_get(var), level + 1)
+        }.join.gsub(/(\n\s*)+\n/m, "\n")
+      else
+        item.to_s
+      end
+    end
+
     def get_property(item)
       asin = item.asin.to_s
-      attr = item.item_attributes.to_h
+      attr = item.item_attributes.first.to_h
       attr.each_key do |key|
-        attr[key] = attr[key].to_s
+        attr[key] = get_AWSObject_attr(attr[key], 1)
       end
       attr["asin"] ||= asin
       attr
@@ -596,10 +619,9 @@ EOS
 
     def print_property(attr)
       attr.each_pair do |key, value|
-        if value.index("\n")
-          puts "#{key}:"
-          value2 = "\t" + value.chomp.gsub(/\n/, "\n\t")
-          puts value2
+        if /^ / =~ value
+          print "#{key}:"
+          puts value
         else
           puts "#{key}: #{value}"
         end
@@ -614,7 +636,6 @@ EOS
         puts "><a name=\"#{title}\">"
         puts "</a><"
         puts "\##{title}"
-      end
 
       if attr.key?("asin")
         puts
