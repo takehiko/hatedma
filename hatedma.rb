@@ -160,10 +160,13 @@ module HatenaDiaryManager
       end
 
       art = nil
+      ymd8 = ""
       open(command_pre + @file_diary) do |f_in|
         f_in.each_line do |line0|
           line = line0.reduce_amp
-          if /^\*([0-9]{10,})\*\s*(.*)$/ =~ line
+          if /day date=\"(\d{4})-(\d{2})-(\d{2})/ =~ line
+            ymd8 = $1 + $2 + $3
+          elsif /^\*([0-9]{10,})\*\s*(.*)$/ =~ line
             utime, title0 = $1, $2
             if /^\[.+\]/ =~ title0
               tag, title = $&, $'.strip
@@ -176,37 +179,40 @@ module HatenaDiaryManager
               art.body = art.body.sub(/<\/body>.*\z/m, "")
               art.save(true)
             end
-            art = HatenaDiaryManager::Article.new(utime)
+            art = HatenaDiaryManager::Article.new("#{ymd8}_#{utime}")
             art.body = line
-            find_tag(line, utime)
-            date_tag_comment = "<!-- #{art.ymd}#{tag.empty? ? '' : ' '}#{tag} -->"
+            find_tag(line, art.date_time)
+            date_tag_comment = "<!-- #{art.ymd_j}#{tag.empty? ? '' : ' '}#{tag} -->"
 
             print <<EOS if $DEBUG
+
 URL:    #{art.url}
 title0: #{title0}
 tag:    #{tag}
 tagcom: #{tag_comment}
 dtcom:  #{date_tag_comment}
 title:  #{title}
-utime:  #{utime}
+utime:  #{art.utime}
 time:   #{art.time}
-ymd:    #{art.ymd}
+ymd_j:  #{art.ymd_j}
+ymd8:   #{art.ymd8}
+mismatch_date_time?: #{art.mismatch_date_time?}
 file:   #{art.file}
 line:   #{line}
 EOS
 
             # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=hatedma: はてなダイアリーマネジャー]<!-- 2012年1月13日 [hatedma][Ruby] -->
-            f_out_title.print "[#{art.url}:title=#{title}]#{date_tag_comment}\r\n"
+            f_out_title.print "[#{art.url}:title=#{title}]#{date_tag_comment}#{art.mismatch_date_time? ? '<!--caution:date-->' : ''}\r\n"
 
             # [http://d.hatena.ne.jp/takehikom/20120113/1326401059:title=2012年1月13日]<span class="deco" style="font-size:xx-small;">（hatedma: はてなダイアリーマネジャー）</span> <!-- [hatedma][Ruby] -->
-            f_out_date.print "[#{art.url}:title=#{art.ymd}]<span class=\"deco\" style=\"font-size:xx-small;\">（#{title}）</span>#{tag_comment}\r\n"
+            f_out_date.print "[#{art.url}:title=#{art.ymd_j}]<span class=\"deco\" style=\"font-size:xx-small;\">（#{title}）</span>#{tag_comment}\r\n"
 
             # [[hatedma: はてなダイアリーマネジャー>http://d.hatena.ne.jp/takehikom/20120113/1326401059]]// 2012年1月13日 [hatedma][Ruby]
             f_out_wiki.print "[[#{title}>#{art.url}]]//#{date_tag_comment}\r\n"
 
           elsif art
             art.body += line
-            find_tag(line, art.utime)
+            find_tag(line, art.date_time)
           end
         end
       end
@@ -219,7 +225,7 @@ EOS
       f_out_wiki.close
     end
 
-    def find_tag(s, utime)
+    def find_tag(s, key)
       s.scan(/\[.*?\]/) do |p1|
         p2 = p1[1...-1]
         tagname = ""
@@ -236,7 +242,7 @@ EOS
           tagname = p2
         end
         unless tagname.empty?
-          add_tag(tagname, utime)
+          add_tag(tagname, key)
           if $DEBUG
             puts "find tag: #{tagname}"
           end
@@ -244,13 +250,13 @@ EOS
       end
     end
 
-    def add_tag(name, utime)
+    def add_tag(name, key)
       if @tag_h.key?(name)
-        if @tag_h[name][-1] != utime
-          @tag_h[name] << utime
+        if @tag_h[name][-1] != key
+          @tag_h[name] << key
         end
       else
-        @tag_h[name] = [utime]
+        @tag_h[name] = [key]
       end
     end
 
@@ -377,8 +383,8 @@ EOS
 
     def print_tag_entry(key, flag_print_tag = true)
       puts "[#{key}]" if flag_print_tag
-      @tag_h[key].each do |utime|
-        art = HatenaDiaryManager::Article.new(utime, @output_type == :body)
+      @tag_h[key].each do |key2|
+        art = HatenaDiaryManager::Article.new(key2, @output_type == :body)
         art.print_info(@output_type)
       end
     end
@@ -471,36 +477,54 @@ EOS
 
   class Article
     def initialize(param, opt_load = false)
-      @utime = 0
-      case param
-      when Numeric
-        @utime = param
-      when /^\d+$/
-        @utime = $&.to_i
-      when /http.*\/(\d+)$/
-        @utime = $1.to_i
-      when /(\d+)\.txt$/
-        @utime = $1.to_i
-      else
-        raise "utime not found: #{param}"
-      end
-
+      init_date_time(param)
       c = HatenaDiaryManager::Config.instance
-      @time = Time.at(utime)
-      @url = @time.strftime("http://d.hatena.ne.jp/#{c.username}/%Y%m%d/#{utime}")
-      @file = @time.strftime("#{c.dir_diary}/%Y/%m/%d_#{utime}.txt")
-      @ymd = "#{@time.year}年#{@time.month}月#{@time.day}日"
-      # @ymd = @time.strftime("%Y年%m月%d日")
+      @url = "http://d.hatena.ne.jp/%s/%s/%d" % [c.username, @ymd8, @utime]
+      @file = "%s/%s/%s/%s_%d.txt" % [c.dir_diary, @ymd8[0, 4], @ymd8[4, 2], @ymd8[6, 2], @utime]
+      @ymd_j = "%d年%d月%d日" % [@ymd8[0, 4].to_i, @ymd8[4, 2].to_i, @ymd8[6, 2].to_i]
       @body = ""
       @loaded = false
       load if opt_load
     end
 
-    attr_reader :utime, :url, :time, :ymd
+    attr_reader :utime, :url, :time, :ymd_j, :ymd8, :body
     attr_accessor :file
 
-    def body
-      @body
+    def init_date_time(param)
+      @utime = 0
+      @ymd8 = nil
+
+      case param
+      when Numeric
+        @utime = param
+      when /^\d+$/
+        @utime = $&.to_i
+      when /http.*\/(\d{8})\/(\d+)$/
+        @ymd8 = $1
+        @utime = $2.to_i
+      when /(\d{4})\D?(\d{2})\D?(\d{2})\D?(\d{9,})(\.txt)?$/
+        @ymd8 = $1 + $2 + $3
+        @utime = $4.to_i
+      when /(\d+)(\.txt)?$/
+        @utime = $1.to_i
+      else
+        raise "utime not found: #{param}"
+      end
+
+      @time = Time.at(@utime)
+      @ymd8 ||= @time.strftime("%Y%m%d")
+    end
+
+    def date_time
+      if @ymd8.nil?
+        @utime.to_s
+      else
+        "#{@ymd8}/#{@utime}"
+      end
+    end
+
+    def mismatch_date_time?
+      @time.strftime("%Y%m%d") != @ymd8
     end
 
     def body=(s)
@@ -520,7 +544,8 @@ EOS
     end
 
     def save(opt_verbose)
-      FileUtils.mkdir_p(File.dirname(@file))
+      dir = File.dirname(@file)
+      FileUtils.mkdir_p(dir) unless test(?d, dir)
       open(@file, "w") do |f_out|
         f_out.print @body
       end
@@ -636,6 +661,7 @@ EOS
         puts "><a name=\"#{title}\">"
         puts "</a><"
         puts "\##{title}"
+      end
 
       if attr.key?("asin")
         puts
