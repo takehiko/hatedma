@@ -5,8 +5,9 @@
 
 * シェルで実行します．特定のフォルダ（デフォルトでは，
   ~/.hatedma/はてなユーザー名）にファイルが作られ，hatedma.rbおよび他
-  のソフトウェアで検索ができます．（高機能なgrep型検索として，Rak
-  (http://rak.rubyforge.org/)がおすすめです．）
+  のソフトウェアで検索ができます．（高機能なgrep型検索として，
+  agコマンド(https://github.com/ggreer/the_silver_searcher)がおすすめ
+  です．）
 
 * 記事内の [...] による表記（タグ）を取り出し，同一タグの記事情報を出
   力することができます．ISBNおよびASIN記法については，Ruby/AWSと連携し
